@@ -18,6 +18,8 @@ def find_version(*file_paths):
         return version_match.group(1)
     raise RuntimeError("Unable to find version string.")
 
+requirements = ['honcho==0.4.2',
+                'pika==0.9.13']
 
 setup(
     name='shove',
@@ -29,7 +31,7 @@ setup(
     author_email='dev-webdev@mozilla.com',
     url='https://github.com/mozilla/shove',
     license='MPL v2.0',
-    install_requires=[],
+    install_requires=requirements,
     include_package_data=True,
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
@@ -40,4 +42,9 @@ setup(
         'Programming Language :: Python :: 2.6',
         'Programming Language :: Python :: 2.7',
     ],
+    entry_points={
+        'console_scripts': [
+            'shove=shove.shove:main'
+        ]
+    }
 )
