@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 from collections import namedtuple
+from subprocess import PIPE, STDOUT
 
 import pika
 from honcho.process import Process
@@ -20,7 +21,7 @@ except ImportError:
     sys.exit(1)
 
 
-Order = namedtuple('Order', ('project', 'command'))
+Order = namedtuple('Order', ('project', 'command', 'log_key', 'log_queue'))
 
 
 def create_channel():
@@ -35,13 +36,16 @@ def create_channel():
         )
     )
 
-    return pika.BlockingConnection(params).channel()
+    connection = pika.BlockingConnection(params)
+    channel = connection.channel()
+    return connection, channel
 
 
 def parse_order(order_body):
     data = json.loads(order_body)
     try:
-        return Order(project=data['project'], command=data['command'])
+        return Order(project=data['project'], command=data['command'], log_key=data['log_key'],
+                     log_queue=data['log_queue'])
     except KeyError:
         log.error('Could not parse order: `{0}`'.format(order_body))
         return None
@@ -56,6 +60,12 @@ def execute(order):
     command within it, we log the issue and throw away the order.
 
     Commands are executed in a subprocess, but this blocks until the command is finished.
+
+    :param order:
+        The order to execute, in the form of an Order namedtuple.
+
+    :returns:
+        The output of the command. Includes stdout and stderr together.
     """
     # Locate the procfile that lists the commands available for the requested project.
     project_path = settings.PROJECTS.get(order.project, None)
@@ -76,23 +86,30 @@ def execute(order):
         log.warning('No command `{0}` found in {1}'.format(order.command, procfile_path))
         return
 
-    # Execute the order and log the result.
-    p = Process(command, cwd=project_path, stdout=sys.stdout, stderr=sys.stderr)
-    p.wait()
+    # Execute the order and log the result. Sends stderr to stdout so we get everything in one
+    # blob.
+    p = Process(command, cwd=project_path, stdout=PIPE, stderr=STDOUT)
+    output, err = p.communicate()
     log.info('Finished running {0} - returned {1}'.format(command, p.returncode))
+    return output
 
 
-def consume_message(ch, method, properties, body):
+def consume_message(channel, method, properties, body):
     """Consume a message from the queue."""
     order = parse_order(body)
     if order:
         log.info('Executing order: {0}'.format(order))
-        execute(order)
+        output = execute(order)
+
+        # Send the output of the command to the logging queue.
+        channel.queue_declare(queue=order.log_queue, durable=True)
+        body = json.dumps({'log_key': order.log_key, 'output': output})
+        channel.basic_publish(exchange='', routing_key=order.log_queue, body=body)
 
 
 def main():
     """Connect to RabbitMQ and listen for orders from the captain indefinitely."""
-    channel = create_channel()
+    connection, channel = create_channel()
     channel.queue_declare(queue=settings.QUEUE_NAME, durable=True)
     channel.basic_consume(consume_message, queue=settings.QUEUE_NAME, no_ack=True)
     log.info('Awaiting orders, sir!')
@@ -101,7 +118,7 @@ def main():
     except KeyboardInterrupt:
         log.info('Standing down and returning to base, sir!')
     finally:
-        channel.close(reply_text='Shove standing down, sir!')
+        connection.close(reply_text='Shove standing down, sir!')
 
 
 if __name__ == '__main__':
