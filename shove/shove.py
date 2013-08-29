@@ -70,7 +70,7 @@ def execute(order):
         The order to execute, in the form of an Order namedtuple.
 
     :returns:
-        The output of the command. Includes stdout and stderr together.
+        A tuple of (return_code, output). The output includes stdout and stderr together.
     """
     # Locate the procfile that lists the commands available for the requested project.
     project_path = settings.PROJECTS.get(order.project, None)
@@ -95,8 +95,8 @@ def execute(order):
     # blob.
     p = Process(command, cwd=project_path, stdout=PIPE, stderr=STDOUT)
     output, err = p.communicate()
-    log.info('Finished running {0} - returned {1}'.format(command, p.returncode))
-    return output
+    log.info('Finished running {0} - returned {1}'.format(order.command, p.returncode))
+    return p.returncode, output
 
 
 def consume_message(channel, method, properties, body):
@@ -104,11 +104,16 @@ def consume_message(channel, method, properties, body):
     order = parse_order(body)
     if order:
         log.info('Executing order: {0}'.format(order))
-        output = execute(order)
+        return_code, output = execute(order)
 
         # Send the output of the command to the logging queue.
         channel.queue_declare(queue=order.log_queue, durable=True)
-        body = json.dumps({'log_key': order.log_key, 'output': output, 'version': '1.0'})
+        body = json.dumps({
+            'version': '1.0',  # Version of the logging event format.
+            'log_key': order.log_key,
+            'return_code': return_code,
+            'output': output,
+        })
         channel.basic_publish(exchange='', routing_key=order.log_queue, body=body)
 
 
