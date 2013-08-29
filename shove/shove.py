@@ -108,7 +108,7 @@ def consume_message(channel, method, properties, body):
 
         # Send the output of the command to the logging queue.
         channel.queue_declare(queue=order.log_queue, durable=True)
-        body = json.dumps({'log_key': order.log_key, 'output': output})
+        body = json.dumps({'log_key': order.log_key, 'output': output, 'version': '1.0'})
         channel.basic_publish(exchange='', routing_key=order.log_queue, body=body)
 
 
