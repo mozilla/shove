@@ -1,3 +1,4 @@
+import imp
 import json
 import logging
 import os
@@ -15,10 +16,14 @@ log = logging.getLogger(__name__)
 
 
 try:
-    from . import settings
-except ImportError:
-    print 'Error importing settings.py, did you copy settings.py-dist yet?'
-    sys.exit(1)
+    settings = imp.load_source('shove.settings', os.environ['SHOVE_SETTINGS_FILE'])
+except (ImportError, KeyError):
+    log.warning('Failed to import settings from environment variable, falling back to local file.')
+    try:
+        from . import settings
+    except ImportError:
+        log.warning('Error importing settings.py, did you copy settings.py-dist yet?')
+        sys.exit(1)
 
 
 Order = namedtuple('Order', ('project', 'command', 'log_key', 'log_queue'))
