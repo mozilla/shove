@@ -70,26 +70,31 @@ def execute(order):
         The order to execute, in the form of an Order namedtuple.
 
     :returns:
-        A tuple of (return_code, output). The output includes stdout and stderr together.
+        A tuple of (return_code, output). The output includes stdout and stderr together. If the
+        command failed to execute, return_code will be 1 and the output will be an error message
+        explaining the failure.
     """
     # Locate the procfile that lists the commands available for the requested project.
     project_path = settings.PROJECTS.get(order.project, None)
     if not project_path:
-        log.warning('No project `{0}` found.'.format(order.project))
-        return
+        msg = 'No project `{0}` found.'.format(order.project)
+        log.warning(msg)
+        return 1, msg
 
     procfile_path = os.path.join(project_path, 'bin', 'commands.procfile')
     try:
         with open(procfile_path, 'r') as f:
             procfile = Procfile(f.read())
     except IOError as err:
-        log.error('Error loading procfile for project `{0}`: {1}'.format(order.project, err))
-        return
+        msg = 'Error loading procfile for project `{0}`: {1}'.format(order.project, err)
+        log.error(msg)
+        return 1, msg
 
     command = procfile.commands.get(order.command)
     if not command:
-        log.warning('No command `{0}` found in {1}'.format(order.command, procfile_path))
-        return
+        msg = 'No command `{0}` found in {1}'.format(order.command, procfile_path)
+        log.warning(msg)
+        return 1, msg
 
     # Execute the order and log the result. Sends stderr to stdout so we get everything in one
     # blob.
