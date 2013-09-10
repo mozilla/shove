@@ -2,6 +2,7 @@ import imp
 import json
 import logging
 import os
+import signal
 import sys
 from collections import namedtuple
 from subprocess import PIPE, STDOUT
@@ -27,23 +28,6 @@ except (ImportError, KeyError):
 
 
 Order = namedtuple('Order', ('project', 'command', 'log_key', 'log_queue'))
-
-
-def create_channel():
-    """Create a channel for communicating with RabbitMQ."""
-    params = pika.ConnectionParameters(
-        host=settings.RABBITMQ_HOST,
-        port=settings.RABBITMQ_PORT,
-        virtual_host=settings.RABBITMQ_VHOST,
-        credentials=pika.credentials.PlainCredentials(
-            settings.RABBITMQ_USER,
-            settings.RABBITMQ_PASS
-        )
-    )
-
-    connection = pika.BlockingConnection(params)
-    channel = connection.channel()
-    return connection, channel
 
 
 def parse_order(order_body):
@@ -104,37 +88,156 @@ def execute(order):
     return p.returncode, output
 
 
-def consume_message(channel, method, properties, body):
+def consume_message(adapter, message_body):
     """Consume a message from the queue."""
-    order = parse_order(body)
+    order = parse_order(message_body)
     if order:
         log.info('Executing order: {0}'.format(order))
         return_code, output = execute(order)
 
         # Send the output of the command to the logging queue.
-        channel.queue_declare(queue=order.log_queue, durable=True)
         body = json.dumps({
             'version': '1.0',  # Version of the logging event format.
             'log_key': order.log_key,
             'return_code': return_code,
             'output': output,
         })
-        channel.basic_publish(exchange='', routing_key=order.log_queue, body=body)
+        adapter.send_log(order.log_queue, body)
+
+
+class RabbitMQAdapter(object):
+    """Facilitate communication with captain via RabbitMQ."""
+
+    def __init__(self, callback):
+        """
+        :param callback:
+            Callable to run when a message is received from captain. Arguments are (adapter, body)
+            where adapter is this adapter, and body is the body of the message.
+        """
+        self.callback = callback
+        self.connection = None
+        self.channel = None
+        self.consumer_tag = None
+
+        self._closing = None
+
+    def send_log(self, log_queue, body):
+        """
+        Send a log event back to captain over the specified log queue.
+
+        :param log_queue:
+            Name of the queue to send the log event to.
+
+        :param body:
+            Body of the log event, typically JSON.
+        """
+        log.info('Sending log to log queue `{0}`.'.format(log_queue))
+        def _on_queue_declared(frame):
+            self.channel.basic_publish(exchange='', routing_key=log_queue, body=body)
+        self.channel.queue_declare(_on_queue_declared, queue=log_queue, durable=True)
+
+    def start(self):
+        """
+        Start listening for orders from captain. This method blocks until
+        :func:`RabbitMQAdapter.stop` is called.
+        """
+        log.info('Starting RabbitMQ Adapter...')
+        self.connection = self.connect()
+        self.connection.ioloop.start()
+
+    def stop(self):
+        """Stop listening for orders from captain."""
+        log.info('Stopping RabbitMQ Adapter...')
+        self._closing = True
+        if self.channel:
+            self.channel.basic_cancel(self.on_consumer_cancel, self.consumer_tag)
+            self.connection.ioloop.start()
+
+    def consumer(self, channel, deliver, properties, body):
+        """Pass messages to the callback registered in the constructor."""
+        self.callback(self, body)
+
+    def connect(self):
+        """Create an asynchronous connection to RabbitMQ."""
+        params = pika.ConnectionParameters(
+            host=settings.RABBITMQ_HOST,
+            port=settings.RABBITMQ_PORT,
+            virtual_host=settings.RABBITMQ_VHOST,
+            credentials=pika.credentials.PlainCredentials(
+                settings.RABBITMQ_USER,
+                settings.RABBITMQ_PASS
+            )
+        )
+
+        return pika.SelectConnection(params, self.on_connection_open)
+
+    def on_consumer_cancel(self, frame):
+        """
+        When our consumer is cancelled, close the channel, which in turn will close the connection
+        and shut down the adapter.
+        """
+        log.info('Closing RabbitMQ channel.')
+        self.channel.close()
+
+    def on_connection_close(self, connection, reply_code, reply_text):
+        """
+        When the connection closes, either stop the ioloop if it was intentional, or reconnect if
+        it wasn't.
+        """
+        self.channel = None
+        if self._closing:
+            log.info('Connection closed.')
+            self.connection.ioloop.stop()
+        else:
+            log.info('Conncection closed, will reconnect in 5 seconds...')
+            self.connection.add_timeout(5, self.reconnect)
+
+    def on_channel_close(self, channel, reply_code, reply_text):
+        """When the channel closes, close the connection."""
+        log.info('Closing RabbitMQ connection.')
+        self.connection.close()
+
+    def on_queue_declared(self, frame):
+        """Once the queue is declared, set up our consumer for that queue."""
+        self.consumer_tag = self.channel.basic_consume(self.consumer, queue=settings.QUEUE_NAME,
+                                                       no_ack=True)
+
+    def on_channel_open(self, channel):
+        """After creating the channel, declare the queue we want to communicate on."""
+        channel.add_on_close_callback(self.on_channel_close)
+        channel.queue_declare(self.on_queue_declared, queue=settings.QUEUE_NAME, durable=True)
+
+    def on_connection_open(self, connection):
+        """After we open the connection, create a channel to work with."""
+        connection.add_on_close_callback(self.on_connection_close)
+        self.channel = connection.channel(self.on_channel_open)
+
+    def reconnect(self):
+        """Stop the ioloop and reconnect to RabbitMQ if we aren't intentionally closed."""
+        log.info('Reconnecting to RabbitMQ...')
+        self.connection.ioloop.stop()
+        if not self._closing:
+            self.connection = self.connect()
+            self.connection.ioloop.start()
+
 
 
 def main():
     """Connect to RabbitMQ and listen for orders from the captain indefinitely."""
-    connection, channel = create_channel()
-    channel.queue_declare(queue=settings.QUEUE_NAME, durable=True)
-    channel.basic_consume(consume_message, queue=settings.QUEUE_NAME, no_ack=True)
+    adapter = RabbitMQAdapter(consume_message)
+
+    # If a SIGINT is sent to the program, shut down the connection and exit.
+    def sigint_handler(signum, frame):
+        log.info('Received SIGINT, shutting down connection.')
+        adapter.stop()
+    signal.signal(signal.SIGINT, sigint_handler)
+
     log.info('Awaiting orders, sir!')
     try:
-        channel.start_consuming()
+        adapter.start()
     except KeyboardInterrupt:
+        adapter.stop()
         log.info('Standing down and returning to base, sir!')
-    finally:
-        connection.close(reply_text='Shove standing down, sir!')
-
 
 if __name__ == '__main__':
     main()
