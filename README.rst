@@ -46,4 +46,9 @@ passing it orders. You pass it orders using Captain.
 To test
 =======
 
-Coming soon.
+After cloning and setting up a virtualenv using the steps above:
+
+1. ``pip install -r requirements.txt``
+2. ``python setup.py nosetests``
+
+Tests are located in the ``tests`` subfolder.

@@ -50,11 +50,11 @@ class Shove(object):
         self.adapter.stop()
 
     def parse_order(self, order_body):
-        data = json.loads(order_body)
         try:
+            data = json.loads(order_body)
             return Order(project=data['project'], command=data['command'], log_key=data['log_key'],
                          log_queue=data['log_queue'])
-        except KeyError:
+        except (KeyError, ValueError):
             log.error('Could not parse order: `{0}`'.format(order_body))
             return None
 
