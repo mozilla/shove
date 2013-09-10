@@ -5,6 +5,12 @@ Shove - It follows the Captain's orders.
 Shove is the second half of `Captain Shove`_. It listens for commands from the
 Captain frontend and executes them.
 
+.. image:: https://api.travis-ci.org/mozilla/shove.png
+   :target: https://travis-ci.org/mozilla/shove
+
+.. image:: https://coveralls.io/repos/mozilla/shove/badge.png?branch=master
+   :target: https://coveralls.io/r/mozilla/shove?branch=master
+
 .. _Captain Shove: https://wiki.mozilla.org/Websites/Captain_Shove
 
 Project details
