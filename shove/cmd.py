@@ -12,6 +12,9 @@ log = logging.getLogger(__name__)
 
 def main():
     """Connect to RabbitMQ and listen for orders from the captain indefinitely."""
+    # Display logging to commandline for more readable output.
+    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+
     # Attempt to load settings from environment, and if that fails, fallback to a local settings
     # file.
     try:
@@ -20,13 +23,11 @@ def main():
         log.warning('Failed to import settings from environment variable, falling back to local '
                     'file.')
         try:
-            from . import settings
+            directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            settings = imp.load_source('shove.settings', os.path.join(directory, 'settings.py'))
         except ImportError:
             log.warning('Error importing settings.py, did you copy settings.py-dist yet?')
             sys.exit(1)
-
-    # Display logging to commandline for more readable output.
-    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
 
     adapter = RabbitMQAdapter(
         host=settings.RABBITMQ_HOST,

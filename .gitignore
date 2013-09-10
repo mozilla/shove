@@ -1,4 +1,4 @@
-shove/settings.py
+settings.py
 *.py[co]
 *.sw[po]
 .coverage
