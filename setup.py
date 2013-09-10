@@ -44,7 +44,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'shove=shove.shove:main'
+            'shove=shove.cmd:main'
         ]
     }
 )
