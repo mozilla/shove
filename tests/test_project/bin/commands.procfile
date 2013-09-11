@@ -1,3 +1,0 @@
-ping: echo 'pong'
-pwd: pwd
-false: false
