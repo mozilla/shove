@@ -1,0 +1,6 @@
+cmd: test
+no spaces: blah
+valid_underscore:homer
+
+# You can add comments and other weird stuff, it's all good.
+valid03: foo bar --baz

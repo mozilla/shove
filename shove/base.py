@@ -1,15 +1,15 @@
 import json
 import logging
 import os
+import re
 from collections import namedtuple
-from subprocess import PIPE, STDOUT
+from subprocess import PIPE, Popen, STDOUT
 
 import pika
-from honcho.process import Process
-from honcho.procfile import Procfile
 
 
 log = logging.getLogger(__name__)
+PROCFILE_LINE = re.compile(r'^([A-Za-z0-9_]+):\s*(.+)$')  # Procfile regex taken from honcho.
 
 
 Order = namedtuple('Order', ('project', 'command', 'log_key', 'log_queue'))
@@ -58,6 +58,21 @@ class Shove(object):
             log.error('Could not parse order: `{0}`'.format(order_body))
             return None
 
+    def parse_procfile(self, path):
+        """
+        Parse a procfile and return a dictionary of commands in the file.
+
+        :param path:
+            Path to the procfile to parse.
+        """
+        commands = {}
+
+        with open(path, 'r') as f:
+            for line in f.readlines():
+                match = PROCFILE_LINE.match(line)
+                if match:
+                    commands[match.group(1)] = match.group(2)
+        return commands
 
     def execute(self, order):
         """
@@ -86,14 +101,13 @@ class Shove(object):
 
         procfile_path = os.path.join(project_path, 'bin', 'commands.procfile')
         try:
-            with open(procfile_path, 'r') as f:
-                procfile = Procfile(f.read())
+            commands = self.parse_procfile(procfile_path)
         except IOError as err:
             msg = 'Error loading procfile for project `{0}`: {1}'.format(order.project, err)
             log.error(msg)
             return 1, msg
 
-        command = procfile.commands.get(order.command)
+        command = commands.get(order.command)
         if not command:
             msg = 'No command `{0}` found in {1}'.format(order.command, procfile_path)
             log.warning(msg)
@@ -101,7 +115,7 @@ class Shove(object):
 
         # Execute the order and log the result. Sends stderr to stdout so we get everything in one
         # blob.
-        p = Process(command, cwd=project_path, stdout=PIPE, stderr=STDOUT)
+        p = Popen(command, cwd=project_path, stdout=PIPE, stderr=STDOUT)
         output, err = p.communicate()
         log.info('Finished running {0} - returned {1}'.format(order.command, p.returncode))
         return p.returncode, output
