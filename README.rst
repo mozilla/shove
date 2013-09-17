@@ -17,7 +17,7 @@ Project details
 ===============
 
 :Code:          https://github.com/mozilla/shove
-:Documentation: Ha!
+:Documentation: http://captain.readthedocs.org/en/latest/
 :Issue tracker: https://github.com/mozilla/shove/issues
 :IRC:           ``#capshove`` on irc.mozilla.org
 :License:       Mozilla Public License v2
