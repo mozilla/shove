@@ -25,5 +25,5 @@ QUEUE_NAME = 'captain_shove'
 # values are the path to the repo root directory. Shove expects to find a file under
 # `bin/commands.procfile` in each directory here.
 PROJECTS = {
-    'example_project': path('path', 'to', 'project'),
+    'test_project': path('tests', 'test_project'),
 }
