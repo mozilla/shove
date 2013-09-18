@@ -1,5 +1,4 @@
 # Required dependencies.
-honcho==0.4.2
 pika==0.9.13
 
 # Testing dependencies.
