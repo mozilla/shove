@@ -118,7 +118,7 @@ class Shove(object):
         # blob.
         p = Popen(command, cwd=project_path, stdout=PIPE, stderr=STDOUT)
         output, err = p.communicate()
-        log.info('Finished running {0} - returned {1}'.format(order.command, p.returncode))
+        log.info('Finished running {0} {1} - returned {2}'.format(order.command, command, p.returncode))
         return p.returncode, output
 
 
