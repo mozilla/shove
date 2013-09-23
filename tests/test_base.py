@@ -66,7 +66,7 @@ class ShoveTests(TestCase):
 
             return_code, output = shove.execute(order)
 
-        Popen.assert_called_with('pwd', cwd=path('test_project'), stdout=PIPE, stderr=STDOUT)
+        Popen.assert_called_with(['pwd'], cwd=path('test_project'), stdout=PIPE, stderr=STDOUT)
         p.communicate.assert_called_with()
         eq_(return_code, 0)
         eq_(output, 'command output')
@@ -100,4 +100,8 @@ class ShoveTests(TestCase):
     def test_parse_procfile(self):
         shove = Shove({}, Mock())
         commands = shove.parse_procfile(path('test_procfile.procfile'))
-        eq_(commands, {'cmd': 'test', 'valid_underscore': 'homer', 'valid03': 'foo bar --baz'})
+        eq_(commands, {
+            'cmd': ['test'],
+            'valid_underscore': ['homer'],
+            'valid03': ['foo', 'bar' ,'--baz']
+        })

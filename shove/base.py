@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import shlex
 from collections import namedtuple
 from subprocess import PIPE, Popen, STDOUT
 
@@ -71,7 +72,7 @@ class Shove(object):
             for line in f.readlines():
                 match = PROCFILE_LINE.match(line)
                 if match:
-                    commands[match.group(1)] = match.group(2)
+                    commands[match.group(1)] = shlex.split(match.group(2))
         return commands
 
     def execute(self, order):
