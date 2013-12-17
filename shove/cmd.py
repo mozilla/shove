@@ -13,7 +13,7 @@ log = logging.getLogger(__name__)
 def main():
     """Connect to RabbitMQ and listen for orders from the captain indefinitely."""
     # Display logging to commandline for more readable output.
-    logging.basicConfig(format='%(levelname)s: %(message)s', level=logging.INFO)
+    logging.basicConfig(format='%(asctime)s - %(levelname)s: %(message)s', level=logging.INFO)
 
     # Attempt to load settings from environment, and if that fails, fallback to a local settings
     # file.
