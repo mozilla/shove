@@ -58,3 +58,13 @@ After cloning and setting up a virtualenv using the steps above:
 2. ``python setup.py nosetests``
 
 Tests are located in the ``tests`` subfolder.
+
+To make an RPM (or any supported package)
+=========================================
+
+1. ``git clone https://github.com/mozilla/shove``
+2. ``cd shove``
+3. Install FPM: https://github.com/jordansissel/fpm#get-with-the-download
+4. ``fpm -s python -t rpm -n python-captain-shove shove/setup.py``
+   You can use any supported output for -t
+5. You have RPM (or other package)
