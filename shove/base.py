@@ -53,6 +53,13 @@ class Shove(object):
     def parse_order(self, order_body):
         try:
             data = json.loads(order_body)
+
+            # Special case: The message '{"heartbeat": true}' should be
+            # ignored, as it's sent by captain to keep the network
+            # fresh.
+            if data.get('heartbeat'):
+                return None
+
             return Order(project=data['project'], command=data['command'], log_key=data['log_key'],
                          log_queue=data['log_queue'])
         except (KeyError, ValueError):

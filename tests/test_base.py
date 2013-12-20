@@ -20,6 +20,11 @@ class ShoveTests(TestCase):
         shove = Shove({}, Mock())
         eq_(shove.parse_order('{dfinval=3523}}}}]'), None)
 
+    def test_parse_order_heartbeat(self):
+        """If the given order is a heartbeat command, return None."""
+        shove = Shove({}, Mock())
+        eq_(shove.parse_order('{"heartbeat": true}'), None)
+
     def test_parse_order_missing_key(self):
         """If the given order is missing a required key, return None."""
         shove = Shove({}, Mock())
