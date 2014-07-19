@@ -24,7 +24,7 @@ def main():
                     'file.')
         try:
             directory = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            settings = imp.load_source('shove.settings', os.path.join(directory, 'settings.py'))
+            settings = imp.load_source('shove.settings', os.path.join(directory, 'shove/settings.py'))
         except ImportError:
             log.warning('Error importing settings.py, did you copy settings.py-dist yet?')
             sys.exit(1)
