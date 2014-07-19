@@ -9,3 +9,6 @@ tmp/*
 *~
 *.egg-info
 venv/*
+build/
+dist/
+
