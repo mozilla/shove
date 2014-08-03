@@ -18,7 +18,7 @@ def find_version(*file_paths):
         return version_match.group(1)
     raise RuntimeError("Unable to find version string.")
 
-requirements = ['pika==0.9.13']
+requirements = ['pika==0.9.14']
 
 setup(
     name='shove',

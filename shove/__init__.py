@@ -1,4 +1,4 @@
 from .base import Order, RabbitMQAdapter, Shove
 
 
-__version__ = '0.1.3'
+__version__ = '0.1.4'
