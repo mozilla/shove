@@ -19,7 +19,10 @@ RABBITMQ_PORT = 5672
 RABBITMQ_VHOST = '/'
 RABBITMQ_USER = 'guest'
 RABBITMQ_PASS = 'guest'
-QUEUE_NAME = 'captain_shove'
+
+# Settings for the periodic heartbeat back to Captain.
+HEARTBEAT_QUEUE = 'captain_heartbeat'
+HEARTBEAT_DELAY = 5 * 60  # Seconds
 
 # Map of projects that shove can run commands for. Keys are IDs that captain needs to know about,
 # values are the path to the repo root directory. Shove expects to find a file under

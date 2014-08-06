@@ -4,6 +4,7 @@ import os
 import re
 import shlex
 from collections import namedtuple
+from threading import Event, Thread
 from subprocess import PIPE, Popen, STDOUT
 
 import pika
@@ -20,46 +21,26 @@ class Shove(object):
     """
     Parses orders from Captain and executes commands based on them.
 
-    An order contains a project name and a command to run on that project. Shove maintains a list
-    of projects that it manages and paths to the directories they're stored in. When an order is
-    executed, Shove looks for a procfile within the specified project and looks for a command with
-    the same name as the order. If the command is found, Shove executes it in the project's
-    directory and collects the output, sending it back to Captain for logging.
-
-    To communicate with Captain, Shove needs an ``Adapter``, which handles the specifics of getting
-    orders and logs between the two programs.
+    An order contains a project name and a command to run on that
+    project. Shove maintains a list of projects that it manages and
+    paths to the directories they're stored in. When an order is
+    executed, Shove looks for a procfile within the specified project
+    and looks for a command with the same name as the order. If the
+    command is found, Shove executes it in the project's directory and
+    collects the output, sending it back to Captain for logging.
     """
 
-    def __init__(self, projects, adapter):
+    def __init__(self, projects):
         """
         :param projects:
-            Dictionary that maps project names to the absolute path that the project's repository
-            is located on this system.
-
-        :param adapter:
-            A communication adapter that Shove will use to communicate with Captain.
+            Dictionary that maps project names to the absolute path that
+            the project's repository is located on this system.
         """
         self.projects = projects
-        self.adapter = adapter
-
-    def start(self):
-        """Start listening for commands using the communication adapter."""
-        self.adapter.start(self.process_order)
-
-    def stop(self):
-        """Stop the communication adapter from listening for commands."""
-        self.adapter.stop()
 
     def parse_order(self, order_body):
         try:
             data = json.loads(order_body)
-
-            # Special case: The message '{"heartbeat": true}' should be
-            # ignored, as it's sent by captain to keep the network
-            # fresh.
-            if data.get('heartbeat'):
-                return None
-
             return Order(project=data['project'], command=data['command'], log_key=data['log_key'],
                          log_queue=data['log_queue'])
         except (KeyError, ValueError):
@@ -68,7 +49,8 @@ class Shove(object):
 
     def parse_procfile(self, path):
         """
-        Parse a procfile and return a dictionary of commands in the file.
+        Parse a procfile and return a dictionary of commands in the
+        file.
 
         :param path:
             Path to the procfile to parse.
@@ -86,21 +68,26 @@ class Shove(object):
         """
         Execute the command for the project contained within the order.
 
-        Commands are listed in a procfile within the project's repository. An order contains a project
-        and a command to execute; if there are any issues with finding the procfile or the requested
-        command within it, we log the issue and throw away the order.
+        Commands are listed in a procfile within the project's
+        repository. An order contains a project and a command to
+        execute; if there are any issues with finding the procfile or
+        the requested command within it, we log the issue and throw away
+        the order.
 
-        Commands are executed in a subprocess, but this blocks until the command is finished.
+        Commands are executed in a subprocess, but this blocks until the
+        command is finished.
 
         :param order:
             The order to execute, in the form of an Order namedtuple.
 
         :returns:
-            A tuple of (return_code, output). The output includes stdout and stderr together. If the
-            command failed to execute, return_code will be 1 and the output will be an error message
-            explaining the failure.
+            A tuple of (return_code, output). The output includes stdout
+            and stderr together. If the command failed to execute,
+            return_code will be 1 and the output will be an error
+            message explaining the failure.
         """
-        # Locate the procfile that lists the commands available for the requested project.
+        # Locate the procfile that lists the commands available for the
+        # requested project.
         project_path = self.projects.get(order.project, None)
         if not project_path:
             msg = 'No project `{0}` found.'.format(order.project)
@@ -121,8 +108,8 @@ class Shove(object):
             log.warning(msg)
             return 1, msg
 
-        # Execute the order and log the result. Sends stderr to stdout so we get everything in one
-        # blob.
+        # Execute the order and log the result. Sends stderr to stdout
+        # so we get everything in one blob.
         p = Popen(command, cwd=project_path, stdout=PIPE, stderr=STDOUT)
         output, err = p.communicate()
         log.info('Finished running {0} {1} - returned {2}'.format(order.command, command, p.returncode))
@@ -130,7 +117,14 @@ class Shove(object):
 
 
     def process_order(self, order_body):
-        """Parse and execute an order from Captain."""
+        """
+        Parse and execute an order from Captain.
+
+        :returns:
+            Tuple of (queue, body) where queue is the name of the
+            logging queue to send the command log to, and body is the
+            JSON-encoded body of the log message to send.
+        """
         order = self.parse_order(order_body)
         if order:
             log.info('Executing order: {0}'.format(order))
@@ -138,76 +132,134 @@ class Shove(object):
 
             # Send the output of the command to the logging queue.
             body = json.dumps({
-                'version': '1.0',  # Version of the logging event format.
+                'version': '1.0',  # Version of the logging event format
                 'log_key': order.log_key,
                 'return_code': return_code,
                 'output': output,
             })
-            self.adapter.send_log(order.log_queue, body)
+            return order.log_queue, body
+
+
+class ShoveThread(Thread):
+    """Thread that handles incoming orders from Captain."""
+    def __init__(self, projects, queue, adapter_kwargs, *args, **kwargs):
+        """
+        Accepts standard threading.Thread arguments in additon to the
+        listed arguments.
+
+        :param projects:
+            Map of project names to their directories. See settings.py
+            for more information.
+
+        :param queue:
+            Name of the queue to listen on for commands.
+
+        :param adapter_kwargs:
+            Kwargs for RabbitMQAdapter so we can connect to RabbitMQ.
+        """
+        super(ShoveThread, self).__init__(*args, **kwargs)
+        self.projects = projects
+        self.queue = queue
+        self.adapter_kwargs = adapter_kwargs
+
+    def run(self):
+        # We have to create the adapter in the thread since pika doesn't
+        # work across threads.
+        self.adapter = RabbitMQAdapter(**self.adapter_kwargs)
+        self.adapter.connect()
+        shove = Shove(self.projects)
+
+        def callback(body):
+            return shove.process_order(body)
+
+        self.adapter.listen(self.queue, callback)
+        self.adapter.close()
+
+    def stop(self):
+        self.adapter.stop_listening()
+
+
+class HeartbeatThread(Thread):
+    """
+    A thead that sends a heartbeat event to Captain on a regular
+    interval notifying it of its current status.
+    """
+    def __init__(self, delay, queue, adapter_kwargs, data, *args, **kwargs):
+        """
+        Accepts standard threading.Thread arguments in additon to the
+        listed arguments.
+
+        :param delay:
+            Delay in seconds between heartbeats.
+
+        :param queue:
+            Name of the queue to sent heartbeat messages to.
+
+        :param adapter_kwargs:
+            Kwargs to use for initializing a RabbitMQAdapter for
+            communicating with Captain. An adapter cannot be directly
+            passed in as Pika is not safe across threads.
+
+        :param data:
+            Data to send in the body of the heartbeat message. Must be
+            able to be encoded via json.dumps.
+        """
+        super(HeartbeatThread, self).__init__(*args, **kwargs)
+        self.delay = delay
+        self.queue = queue
+        self.adapter_kwargs = adapter_kwargs
+        self.message = json.dumps(data)
+
+        self.close_event = Event()
+
+    def run(self):
+        adapter = RabbitMQAdapter(**self.adapter_kwargs)
+        adapter.connect()
+
+        # Send initial message at least once.
+        adapter.send_message(self.queue, self.message)
+
+        while not self.close_event.wait(self.delay):
+            adapter.send_message(self.queue, self.message)
+
+        adapter.close()
+
+    def stop(self):
+        self.close_event.set()
 
 
 class RabbitMQAdapter(object):
-    """Adapter for communicating with Captain via RabbitMQ."""
-
-    def __init__(self, host, port, queue, virtual_host, username, password):
+    """
+    Adapter for communicating with Captain via RabbitMQ that blocks
+    instead of being asynchronous.
+    """
+    def __init__(self, host, port, virtual_host, username, password):
         # Connection settings.
         self.host = host
         self.port = port
-        self.queue = queue
         self.virtual_host = virtual_host
         self.username = username
         self.password = password
 
-        self.callback = None
         self.connection = None
         self.channel = None
-        self.consumer_tag = None
 
-        self._closing = None
-
-    def send_log(self, log_queue, body):
+    def send_message(self, queue, body):
         """
-        Send a log event back to Captain over the specified log queue.
+        Send a message back to Captain over the specified queue.
 
-        :param log_queue:
-            Name of the queue to send the log event to.
+        :param queue:
+            Name of the queue to send the message to.
 
         :param body:
-            Body of the log event, typically JSON.
+            Body of the message, typically JSON.
         """
-        log.info('Sending log to log queue `{0}`.'.format(log_queue))
-        def _on_queue_declared(frame):
-            self.channel.basic_publish(exchange='', routing_key=log_queue, body=body)
-        self.channel.queue_declare(_on_queue_declared, queue=log_queue, durable=True)
-
-    def start(self, callback):
-        """
-        Start listening for orders from Captain. This method blocks until
-        :func:`RabbitMQAdapter.stop` is called.
-
-        :param callback:
-            Callable to run when a message is received from Captain. Arguments are (adapter, body)
-            where adapter is this adapter, and body is the body of the message.
-        """
-        log.info('Starting RabbitMQ Adapter...')
-        self.callback = callback
-        self.connection = self.connect()
-        self.connection.ioloop.start()
-
-    def stop(self):
-        """Stop listening for orders from Captain."""
-        log.info('Stopping RabbitMQ Adapter...')
-        self._closing = True
-        if self.channel:
-            self.channel.basic_cancel(self.on_consumer_cancel, self.consumer_tag)
-            self.connection.ioloop.start()
-
-    def consumer(self, channel, deliver, properties, body):
-        """Pass messages to the callback registered in the constructor."""
-        self.callback(body)
+        log.info('Sending message to queue `{0}`.'.format(queue))
+        self.channel.queue_declare(queue=queue, durable=True)
+        self.channel.basic_publish(exchange='', routing_key=queue, body=body)
 
     def connect(self):
-        """Create an asynchronous connection to RabbitMQ."""
+        """Create a blocking connection to RabbitMQ."""
         params = pika.ConnectionParameters(
             host=self.host,
             port=self.port,
@@ -215,53 +267,40 @@ class RabbitMQAdapter(object):
             credentials=pika.credentials.PlainCredentials(self.username, self.password)
         )
 
-        return pika.SelectConnection(params, self.on_connection_open)
+        self.connection = pika.BlockingConnection(params)
+        self.channel = self.connection.channel()
 
-    def on_consumer_cancel(self, frame):
-        """
-        When our consumer is cancelled, close the channel, which in turn will close the connection
-        and shut down the adapter.
-        """
-        log.info('Closing RabbitMQ channel.')
+    def close(self):
+        """Close the connection to RabbitMQ."""
         self.channel.close()
-
-    def on_connection_close(self, connection, reply_code, reply_text):
-        """
-        When the connection closes, either stop the ioloop if it was intentional, or reconnect if
-        it wasn't.
-        """
-        self.channel = None
-        if self._closing:
-            log.info('Connection closed.')
-            self.connection.ioloop.stop()
-        else:
-            log.info('Conncection closed, will reconnect in 5 seconds...')
-            self.connection.add_timeout(5, self.reconnect)
-
-    def on_channel_close(self, channel, reply_code, reply_text):
-        """When the channel closes, close the connection."""
-        log.info('Closing RabbitMQ connection.')
         self.connection.close()
 
-    def on_queue_declared(self, frame):
-        """Once the queue is declared, set up our consumer for that queue."""
-        self.consumer_tag = self.channel.basic_consume(self.consumer, queue=self.queue,
-                                                       no_ack=True)
+    def listen(self, queue, callback):
+        """
+        Listen on the specified queue, passing the body of recieved
+        messages to the callback. Blocks until disconnected or
+        RabbitMQAdapter.stop_listening is called.
+        """
+        # Since shove instances come up and down with different uuids,
+        # queues we listen on shouldn't be durable.
+        self.queue = queue
+        self.channel.queue_declare(queue=queue)
 
-    def on_channel_open(self, channel):
-        """After creating the channel, declare the queue we want to communicate on."""
-        channel.add_on_close_callback(self.on_channel_close)
-        channel.queue_declare(self.on_queue_declared, queue=self.queue, durable=True)
+        def consume(channel, deliver, properties, body):
+            result = callback(body)
+            if result:
+                queue, body = result
+                channel.basic_publish(exchange='', routing_key=queue, body=body)
 
-    def on_connection_open(self, connection):
-        """After we open the connection, create a channel to work with."""
-        connection.add_on_close_callback(self.on_connection_close)
-        self.channel = connection.channel(self.on_channel_open)
+        self.channel.basic_consume(consume, queue, no_ack=True)
+        self.channel.start_consuming()
 
-    def reconnect(self):
-        """Stop the ioloop and reconnect to RabbitMQ if we aren't intentionally closed."""
-        log.info('Reconnecting to RabbitMQ...')
-        self.connection.ioloop.stop()
-        if not self._closing:
-            self.connection = self.connect()
-            self.connection.ioloop.start()
+    def stop_listening(self):
+        """
+        Stop listening for messages. Any currently-active
+        RabbitMQAdapter.listen calls will return.
+        """
+        self.channel.stop_consuming()
+        self.channel.queue_delete(self.queue)
+        self.queue = None
+
