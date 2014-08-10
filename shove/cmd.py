@@ -48,8 +48,10 @@ def main():
     shove = ShoveThread(settings.PROJECTS, queue_name, adapter_kwargs, name='shove')
 
     heartbeat_data = {
+        'version': '1.0',  # Version of the heartbeat format.
         'routing_key': queue_name,
         'hostname': socket.gethostname(),
+        'project_names': ','.join(settings.PROJECTS.keys()),
     }
     heartbeat = HeartbeatThread(settings.HEARTBEAT_DELAY, settings.HEARTBEAT_QUEUE, adapter_kwargs,
                                 heartbeat_data, name='heartbeat')
