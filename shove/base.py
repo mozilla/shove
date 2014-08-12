@@ -281,10 +281,8 @@ class RabbitMQAdapter(object):
         messages to the callback. Blocks until disconnected or
         RabbitMQAdapter.stop_listening is called.
         """
-        # Since shove instances come up and down with different uuids,
-        # queues we listen on shouldn't be durable.
         self.queue = queue
-        self.channel.queue_declare(queue=queue)
+        self.channel.queue_declare(queue=queue, durable=True)
 
         def consume(channel, deliver, properties, body):
             result = callback(body)
