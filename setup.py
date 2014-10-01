@@ -32,7 +32,6 @@ setup(
     url='https://github.com/mozilla/shove',
     license='MPL v2.0',
     install_requires=requirements,
-    include_package_data=True,
     classifiers=[
         'Development Status :: 2 - Pre-Alpha',
         'Intended Audience :: Developers',
