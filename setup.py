@@ -19,10 +19,10 @@ def find_version(*file_paths):
         return version_match.group(1)
     raise RuntimeError("Unable to find version string.")
 
-requirements = ['pika==0.9.14']
+requirements = ['pika==0.9.13']
 
 setup(
-    name='shove',
+    name='python-captain-shove',
     description='Server-side daemon that listens to commands from Captain.',
     long_description=read('README.rst'),
     version=find_version('shove/__init__.py'),
