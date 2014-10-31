@@ -264,7 +264,8 @@ class RabbitMQAdapter(object):
             host=self.host,
             port=self.port,
             virtual_host=self.virtual_host,
-            credentials=pika.credentials.PlainCredentials(self.username, self.password)
+            credentials=pika.credentials.PlainCredentials(self.username, self.password),
+            heartbeat_interval=600,
         )
 
         self.connection = pika.BlockingConnection(params)
